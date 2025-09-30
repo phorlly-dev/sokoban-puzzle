@@ -152,7 +152,7 @@ const Controllers = {
         // play effects 🎉
         playLevelCompleteFX(scene, winText);
 
-        scene.score += 100;
+        scene.score += scene.boxLength * 100;
         emitEvent("score", scene.score);
 
         // Example: progress and rebuild the next level after a short pause

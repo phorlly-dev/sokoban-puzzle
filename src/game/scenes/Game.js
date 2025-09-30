@@ -48,6 +48,7 @@ class GameEngine extends Phaser.Scene {
         this.hasWon = false;
         this.score = 0;
         this.level = 1;
+        this.boxLength = 1;
         this.currentPair = COLORS.GREEN;
 
         // debug / visuals

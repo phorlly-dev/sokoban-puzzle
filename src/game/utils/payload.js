@@ -29,11 +29,13 @@ const Payloads = {
         // choose one color pair for scene level
         scene.currentPair = Phaser.Utils.Array.GetRandom(Object.values(COLORS));
 
+        scene.boxLength = Phaser.Utils.Array.GetRandom([1, 2, 3, 4, 5]);
+
         // generate grid data (make sure your generator can place WALLs)
         scene.data = generateRandomLevel(scene, {
             rows: 6,
             cols: 6,
-            boxCount: 3,
+            boxCount: scene.boxLength,
             pair: scene.currentPair,
             level: scene.level,
         });
@@ -286,8 +288,8 @@ const Payloads = {
             .text(
                 winText ? winText.x : scene.scale.width / 2,
                 (winText ? winText.y : scene.scale.height / 2) + 40,
-                "+100",
-                { fontSize: "24px", fontStyle: "bold", color: "#00ff00" }
+                `+${scene.score}`,
+                { fontSize: "24px", fontStyle: "bold", color: "#7ea07eff" }
             )
             .setOrigin(0.5)
             .setDepth(11)

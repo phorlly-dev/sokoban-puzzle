@@ -1,3 +1,4 @@
+import { PLAYER } from "../consts";
 import { applySnapshotAnimated } from "./payload";
 
 const States = {
@@ -31,8 +32,8 @@ const States = {
 
         // fully stop current anim then show idle frame
         scene.player.anims.stop();
-        scene.player.setFrame(52);
         stopIfPlaying(scene.walk);
+        scene.time.delayedCall(360, () => scene.player.setFrame(PLAYER));
     },
     isBlocked(scene, col, row) {
         if (!inBounds(scene, col, row)) return true;
