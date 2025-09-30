@@ -1,5 +1,5 @@
 import { emitEvent, emitEvents, onEvent } from "../../hooks/EventBus";
-import { COLORS } from "../consts";
+import { COLORS, WALL } from "../consts";
 import { tryMove } from "../utils/controller";
 import {
     buildLevel,
@@ -27,6 +27,16 @@ class GameEngine extends Phaser.Scene {
         this.boxes = [];
         this.boxByKey = new Map();
         this.boxAt = (col, row) => this.boxByKey.get(key(col, row));
+        this.wallFrames = WALL;
+        this.wallSet = new Set(this.wallFrames);
+        this.isWallVal = (v) => this.wallSet.has(v);
+        this.isWallAt = (c, r) =>
+            r >= 0 &&
+            r < this.rows &&
+            c >= 0 &&
+            c < this.cols &&
+            this.isWallVal(this.data[r][c]);
+
         this.targets = [];
         this.targetKeys = new Set(); // <-- distinct Set
         this.forbiddenCells = new Set(); // <-- distinct Set
@@ -77,6 +87,7 @@ class GameEngine extends Phaser.Scene {
         this.setupInput();
 
         this.cameras.main.roundPixels = true;
+        this.walk = this.sound.add("walk", { loop: true, volume: 0.8 });
     }
 
     update() {
@@ -161,8 +172,18 @@ class GameEngine extends Phaser.Scene {
             if (!v && !isAnyDirectionActive(this) && !this.isMoving)
                 toIdle(this);
         });
-        onEvent("undo", () => undoLastMove(this));
-        onEvent("reset", () => buildLevel(this));
+        onEvent("mute", (isMuted) => {
+            this.sound.mute = isMuted;
+            this.sound.play("click");
+        });
+        onEvent("undo", () => {
+            undoLastMove(this);
+            this.sound.play("click");
+        });
+        onEvent("reset", () => {
+            buildLevel(this);
+            this.sound.play("click");
+        });
     }
 
     ensureFxTextures() {

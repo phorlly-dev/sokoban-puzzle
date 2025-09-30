@@ -1,6 +1,6 @@
 import * as React from "react";
 import { formatNumber } from "../hooks/format";
-import { offEvents, onEvents } from "../hooks/EventBus";
+import { emitEvent, offEvents, onEvents } from "../hooks/EventBus";
 
 const Header = ({ player, onLogout }) => {
     const [isMuted, setIsMuted] = React.useState(false);

@@ -1,4 +1,3 @@
-import { WALL } from "../consts";
 import { applySnapshotAnimated } from "./payload";
 
 const States = {
@@ -29,15 +28,16 @@ const States = {
     },
     toIdle(scene) {
         if (!scene.player) return;
-        // fully stop current anim then show idle frame
 
+        // fully stop current anim then show idle frame
         scene.player.anims.stop();
         scene.player.setFrame(52);
+        stopIfPlaying(scene.walk);
     },
     isBlocked(scene, col, row) {
         if (!inBounds(scene, col, row)) return true;
 
-        return scene.data[row][col] === WALL; // if you don't use WALLs scene is always false for in-bounds cells
+        return scene.isWallAt(col, row);
     },
     makeAnims(scene, texture, defs) {
         defs.forEach(({ key, start, end }) => {
@@ -107,11 +107,12 @@ const States = {
         }
         if (typeof x.destroy === "function") x.destroy(true);
     },
-    isSolid(grid, c, r) {
+    isSolid(scene, grid, c, r) {
         const rows = grid.length,
             cols = grid[0].length;
         if (c < 0 || c >= cols || r < 0 || r >= rows) return true;
-        return grid[r][c] === WALL;
+
+        return scene.isWallAt(c, r);
     },
     isBox(grid, c, r, boxId) {
         return grid[r]?.[c] === boxId; // current-level box id
@@ -119,11 +120,16 @@ const States = {
     isTarget(targetKeys, c, r) {
         return targetKeys.has(`${c},${r}`);
     },
-    isCorner(grid, c, r) {
-        const a = isSolid(grid, c - 1, r) && isSolid(grid, c, r - 1);
-        const b = isSolid(grid, c + 1, r) && isSolid(grid, c, r - 1);
-        const c1 = isSolid(grid, c - 1, r) && isSolid(grid, c, r + 1);
-        const d = isSolid(grid, c + 1, r) && isSolid(grid, c, r + 1);
+    isCorner(scene, grid, c, r) {
+        const a =
+            isSolid(scene, grid, c - 1, r) && isSolid(scene, grid, c, r - 1);
+        const b =
+            isSolid(scene, grid, c + 1, r) && isSolid(scene, grid, c, r - 1);
+        const c1 =
+            isSolid(scene, grid, c - 1, r) && isSolid(scene, grid, c, r + 1);
+        const d =
+            isSolid(scene, grid, c + 1, r) && isSolid(scene, grid, c, r + 1);
+
         return a || b || c1 || d;
     },
     shuffleInPlace(args) {
@@ -133,6 +139,19 @@ const States = {
         }
 
         return args;
+    },
+    randomWall(scene) {
+        return scene.wallFrames[(Math.random() * scene.wallFrames.length) | 0];
+    },
+    playIfNotPlaying(sound) {
+        if (sound && !sound.isPlaying) {
+            sound.play();
+        }
+    },
+    stopIfPlaying(sound) {
+        if (sound && sound.isPlaying) {
+            sound.stop();
+        }
     },
 };
 
@@ -158,4 +177,7 @@ export const {
     shuffleInPlace,
     isBox,
     inB,
+    randomWall,
+    playIfNotPlaying,
+    stopIfPlaying,
 } = States;

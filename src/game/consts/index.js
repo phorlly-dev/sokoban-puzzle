@@ -1,10 +1,10 @@
 const INSTANCES = {
     GAME: {
-        WIDTH: 400,
+        WIDTH: 390,
         HEIGHT: 400,
     },
     TILES: {
-        WALL: 100,
+        WALL: [84, 85, 86, 87, 97, 98, 99, 100],
         FLOOR: 0,
         PLAYER: 52,
     },
@@ -15,15 +15,9 @@ const INSTANCES = {
         GREEN: { BOX: 4, TARGET: 43 },
         GRAY: { BOX: 5, TARGET: 44 },
     },
-    IDLE_ANIM: {
-        left: "idle-left",
-        right: "idle-right",
-        up: "idle-up",
-        down: "idle-down",
-    },
 };
 
-export const { GAME, TILES, COLORS, IDLE_ANIM } = INSTANCES;
+export const { GAME, TILES, COLORS } = INSTANCES;
 export const { WIDTH, HEIGHT } = GAME;
 export const { WALL, FLOOR, PLAYER } = TILES;
 export const { ORANGE, RED, BLUE, GREEN, GRAY } = COLORS;

@@ -1,8 +1,7 @@
-import { COLORS, FLOOR, PLAYER, WALL } from "../consts";
+import { COLORS, FLOOR, PLAYER } from "../consts";
 import {
     destroyLevelGraphics,
     drawDashedGrid,
-    exceedsMaxRunAfterStamp,
     generateRandomLevel,
 } from "./controller";
 import {
@@ -15,6 +14,7 @@ import {
     isTarget,
     key,
     makeAnims,
+    randomWall,
     snapToGrid,
     toIdle,
 } from "./state";
@@ -82,7 +82,7 @@ const Payloads = {
 
         // --- WALL layer (NEW: kept)
         const wallData = scene.data.map((row) =>
-            row.map((v) => (v === WALL ? WALL : -1))
+            row.map((v) => (scene.isWallVal(v) ? v : -1))
         );
         scene.wallMap = scene.make.tilemap({
             data: wallData,
@@ -101,7 +101,7 @@ const Payloads = {
 
         // --- ENTITY temp layer (PLAYER/BOX/TARGET only; WALLS excluded)
         const entitiesData = scene.data.map((row) =>
-            row.map((v) => (v === FLOOR || v === WALL ? -1 : v))
+            row.map((v) => (v === FLOOR || scene.isWallVal(v) ? -1 : v))
         );
         scene.entMap = scene.make.tilemap({
             data: entitiesData,
@@ -305,8 +305,7 @@ const Payloads = {
         });
 
         // Optional: play a win sound if you have one
-        // if (scene.sound && scene.sound.get("win"))
-        //     scene.sound.play("win", { volume: 0.6 });
+        if (scene.sound && scene.sound.get("win")) scene.sound.play("win");
     },
     createAnimations(scene) {
         makeAnims(scene, "tiles", [
@@ -317,14 +316,15 @@ const Payloads = {
         ]);
     },
     addWallsWithPlayability(
+        scene,
         grid,
         playerPos,
         level,
         {
-            startLevel = 3, // no walls below this level
-            minDistFromPlayer = 1, // keep walls this far from player start (Manhattan)
-            protectTargets = true, // true => don't touch cells next to targets
-            targetKeys = new Set(), // Set of "c,r" strings for targets
+            startLevel = 3,
+            minDistFromPlayer = 1,
+            protectTargets = true,
+            targetKeys = new Set(),
         } = {}
     ) {
         if (level < startLevel) return;
@@ -332,20 +332,21 @@ const Payloads = {
         const rows = grid.length,
             cols = grid[0].length;
 
-        // difficulty (bars to stamp, length range)
+        // difficulty
         const bars = Phaser.Math.Clamp(Math.floor(level / 3) + 1, 1, 5);
         const lenMin = 2;
         const lenMax = Math.max(lenMin, Math.min(cols, rows) - 2);
 
-        const isTarget = (c, r) => targetKeys.has(`${c},${r}`);
+        // ---- local helpers that read the *grid* (not scene.data) ----
         const inBounds = (c, r) => c >= 0 && c < cols && r >= 0 && r < rows;
-        const isWall = (c, r) => inBounds(c, r) && grid[r][c] === WALL;
-        const isFree = (c, r) => inBounds(c, r) && grid[r][c] !== WALL;
+        const isWallVal = (v) => scene.isWallVal(v);
+        const isWallAt = (c, r) => inBounds(c, r) && isWallVal(grid[r][c]);
+        const isFreeAt = (c, r) => inBounds(c, r) && !isWallVal(grid[r][c]);
+        const isTarget = (c, r) => targetKeys.has(`${c},${r}`);
 
         const manhattan = (c, r, c2, r2) => Math.abs(c - c2) + Math.abs(r - r2);
         const nearPlayer = (c, r) =>
             manhattan(c, r, playerPos.col, playerPos.row) <= minDistFromPlayer;
-
         const nearTarget = (c, r) =>
             isTarget(c, r) ||
             isTarget(c + 1, r) ||
@@ -353,32 +354,8 @@ const Payloads = {
             isTarget(c, r + 1) ||
             isTarget(c, r - 1);
 
-        // No 1-tile corridor: any non-wall cell must NOT have both L&R walls or both U&D walls
-        const createsOneTileCorridor = (cells) => {
-            // temporarily mark
-            for (const { c, r } of cells) grid[r][c] = WALL;
-
-            let bad = false;
-            for (let r = 0; !bad && r < rows; r++) {
-                for (let c = 0; !bad && c < cols; c++) {
-                    if (grid[r][c] === WALL) continue;
-                    const lr = isWall(c - 1, r) && isWall(c + 1, r);
-                    const ud = isWall(c, r - 1) && isWall(c, r + 1);
-                    if (lr || ud) {
-                        // allow if this cell is a target AND still has a 2-tile push lane
-                        if (!isTarget(c, r) || !hasAnyPushLane(c, r))
-                            bad = true;
-                    }
-                }
-            }
-
-            // rollback temp marks
-            for (const { c, r } of cells) grid[r][c] = FLOOR;
-            return bad;
-        };
-
-        // Target must have at least one direction with [target+dir] free and [target+2*dir] free (the lane to push into it)
-        function hasAnyPushLane(tc, tr) {
+        // must have a 2-tile push lane into each target
+        const hasAnyPushLane = (tc, tr) => {
             const dirs = [
                 [1, 0],
                 [-1, 0],
@@ -390,49 +367,102 @@ const Payloads = {
                     n1r = tr + dy;
                 const n2c = tc + 2 * dx,
                     n2r = tr + 2 * dy;
-                if (isFree(n1c, n1r) && isFree(n2c, n2r)) return true;
+                if (isFreeAt(n1c, n1r) && isFreeAt(n2c, n2r)) return true;
             }
             return false;
-        }
+        };
 
-        // After stamping, every target must still have a push lane
-        const breaksTargetLanes = (cells) => {
-            // temp stamp
-            for (const { c, r } of cells) grid[r][c] = WALL;
+        // temp bar joins an existing wall?
+        const touchesExistingWall = (cells) => {
+            const mask = new Set(cells.map(({ c, r }) => `${c},${r}`));
+            const dirs = [
+                [1, 0],
+                [-1, 0],
+                [0, 1],
+                [0, -1],
+            ];
 
-            let broken = false;
-            for (const tk of targetKeys) {
-                const [tc, tr] = tk.split(",").map(Number);
-                if (!hasAnyPushLane(tc, tr)) {
-                    broken = true;
+            for (const { c, r } of cells) {
+                for (const [dx, dy] of dirs) {
+                    const nc = c + dx,
+                        nr = r + dy;
+                    if (!inBounds(nc, nr)) continue;
+                    if (isWallAt(nc, nr) && !mask.has(`${nc},${nr}`))
+                        return true;
+                }
+            }
+            return false;
+        };
+
+        // Measure continuous run length along (dx,dy) including (c,r)
+        const measureRunLen = (c, r, dx, dy) => {
+            let x = c,
+                y = r;
+            while (inBounds(x - dx, y - dy) && isWallAt(x - dx, y - dy)) {
+                x -= dx;
+                y -= dy;
+            }
+            let len = 0;
+            while (inBounds(x, y) && isWallAt(x, y)) {
+                len++;
+                x += dx;
+                y += dy;
+            }
+            return len;
+        };
+
+        // Would stamping exceed a maximum continuous run in the bar direction?
+        const exceedsMaxRunAfterStamp = (cells, horiz, maxRun, barFrame) => {
+            // temp stamp with a single frame
+            for (const { c, r } of cells) grid[r][c] = barFrame;
+            const [dx, dy] = horiz ? [1, 0] : [0, 1];
+            let bad = false;
+            for (const { c, r } of cells) {
+                if (measureRunLen(c, r, dx, dy) > maxRun) {
+                    bad = true;
                     break;
                 }
             }
-
             // rollback
             for (const { c, r } of cells) grid[r][c] = FLOOR;
-            return broken;
+            return bad;
         };
 
-        // Standard reachability check (non-wall connectivity from player)
+        // No 1-tile corridors (except if the cell is a target AND still has a push lane)
+        const createsOneTileCorridor = (cells, barFrame) => {
+            for (const { c, r } of cells) grid[r][c] = barFrame; // temp stamp
+            let bad = false;
+            for (let r = 0; !bad && r < rows; r++) {
+                for (let c = 0; !bad && c < cols; c++) {
+                    if (isWallAt(c, r)) continue; // <-- FIX: skip any wall
+                    const lr = isWallAt(c - 1, r) && isWallAt(c + 1, r);
+                    const ud = isWallAt(c, r - 1) && isWallAt(c, r + 1);
+                    if (lr || ud) {
+                        if (!isTarget(c, r) || !hasAnyPushLane(c, r))
+                            bad = true;
+                    }
+                }
+            }
+            for (const { c, r } of cells) grid[r][c] = FLOOR; // rollback
+            return bad;
+        };
+
+        // reachability on non-wall tiles
         const bfsReachableCount = (startC, startR) => {
-            if (!inBounds(startC, startR) || grid[startR][startC] === WALL)
-                return 0;
-            const seen = new Set();
+            if (!inBounds(startC, startR) || isWallAt(startC, startR)) return 0;
+            const seen = new Set([`${startC},${startR}`]);
             const Q = [{ c: startC, r: startR }];
-            seen.add(`${startC},${startR}`);
             while (Q.length) {
                 const { c, r } = Q.shift();
-                const nbrs = [
+                for (const [dx, dy] of [
                     [1, 0],
                     [-1, 0],
                     [0, 1],
                     [0, -1],
-                ];
-                for (const [dx, dy] of nbrs) {
+                ]) {
                     const nc = c + dx,
                         nr = r + dy;
-                    if (!inBounds(nc, nr) || grid[nr][nc] === WALL) continue;
+                    if (!inBounds(nc, nr) || isWallAt(nc, nr)) continue;
                     const k = `${nc},${nr}`;
                     if (!seen.has(k)) {
                         seen.add(k);
@@ -445,7 +475,7 @@ const Payloads = {
         const countWalkable = () => {
             let n = 0;
             for (let r = 0; r < rows; r++)
-                for (let c = 0; c < cols; c++) if (grid[r][c] !== WALL) n++;
+                for (let c = 0; c < cols; c++) if (!isWallVal(grid[r][c])) n++;
             return n;
         };
 
@@ -454,36 +484,34 @@ const Payloads = {
             const L = Phaser.Math.Between(lenMin, lenMax);
             const c0 = Phaser.Math.Between(1, cols - 2);
             const r0 = Phaser.Math.Between(1, rows - 2);
+            const barFrame = randomWall(scene); // one look per bar
 
             const cells = [];
             for (let i = 0; i < L; i++) {
                 const c = horiz ? c0 + i : c0;
                 const r = horiz ? r0 : r0 + i;
                 if (c <= 0 || c >= cols - 1 || r <= 0 || r >= rows - 1) break;
-                if (grid[r][c] !== FLOOR) return false;
-                // (keep your existing nearPlayer / nearTarget checks here)
+                if (!isFreeAt(c, r)) return false;
+                if (nearPlayer(c, r)) return false;
+                if (protectTargets && nearTarget(c, r)) return false;
                 cells.push({ c, r });
             }
             if (cells.length < 2) return false;
 
-            // --- PLAYABILITY GUARDS ---
-            // 1) don't join bars to existing walls
-            if (touchesExistingWall(grid, cells)) return false; // NEW
-            // 2) cap continuous run length in the bar direction
-            const MAX_RUN = 3; // tune: 2..4 feels good on 6x6
-            if (exceedsMaxRunAfterStamp(grid, cells, horiz, MAX_RUN))
-                return false; // NEW
-
-            // (keep your corridor / target-lane checks here if you added them)
+            // playability guards
+            if (touchesExistingWall(cells)) return false;
+            const MAX_RUN = 3;
+            if (exceedsMaxRunAfterStamp(cells, horiz, MAX_RUN, barFrame))
+                return false;
+            if (createsOneTileCorridor(cells, barFrame)) return false;
 
             // tentative stamp
-            for (const { c, r } of cells) grid[r][c] = WALL;
+            for (const { c, r } of cells) grid[r][c] = barFrame;
 
-            // connectivity check (your existing BFS)
-            const reach = bfsReachableCount(playerPos.col, playerPos.row);
-            const total = countWalkable();
-            const ok = reach === total;
-
+            // connectivity
+            const ok =
+                bfsReachableCount(playerPos.col, playerPos.row) ===
+                countWalkable();
             if (!ok) {
                 for (const { c, r } of cells) grid[r][c] = FLOOR;
                 return false;
@@ -498,40 +526,6 @@ const Payloads = {
         while (placed < bars && attempts++ < maxAttempts) {
             if (tryStampBar()) placed++;
         }
-
-        // optional tiny fallback
-        if (placed === 0 && level >= startLevel + 2) {
-            for (let r = 1; r < rows - 1; r++) {
-                for (let c = 1; c < cols - 1; c++) {
-                    const cells = [
-                        { c, r },
-                        { c: c + 1, r },
-                    ];
-                    if (grid[r][c] !== FLOOR || grid[r][c + 1] !== FLOOR)
-                        continue;
-                    if (
-                        nearPlayer(c, r) ||
-                        (protectTargets &&
-                            (nearTarget(c, r) || nearTarget(c + 1, r)))
-                    )
-                        continue;
-                    if (
-                        createsOneTileCorridor(cells) ||
-                        breaksTargetLanes(cells)
-                    )
-                        continue;
-                    // final stamp + connectivity check
-                    for (const { c: cc, r: rr } of cells) grid[rr][cc] = WALL;
-                    const ok =
-                        bfsReachableCount(playerPos.col, playerPos.row) ===
-                        countWalkable();
-                    if (!ok) {
-                        for (const { c: cc, r: rr } of cells)
-                            grid[rr][cc] = FLOOR;
-                    } else return;
-                }
-            }
-        }
     },
     centerBoardOffset(scene, { rows, cols, tileSize }) {
         const worldW = cols * tileSize;
@@ -541,8 +535,9 @@ const Payloads = {
 
         return { x: (gameW - worldW) / 2, y: (gameH - worldH) / 2 };
     },
-    forms2x2Trap(grid, c, r) {
-        const S = (x, y) => isSolid(grid, x, y) || grid[y]?.[x] === undefined;
+    forms2x2Trap(scene, grid, c, r) {
+        const S = (x, y) =>
+            isSolid(scene, grid, x, y) || grid[y]?.[x] === undefined;
         // Check 4 quads around (c,r)
         const q1 =
             (S(c, r) && S(c + 1, r)) ||
@@ -557,29 +552,29 @@ const Payloads = {
         // cheaper: consider any 2x2 with three solids around the box cell as trap
         return a || q1;
     },
-    hallwayPinned(grid, c, r) {
-        const left = isSolid(grid, c - 1, r);
-        const right = isSolid(grid, c + 1, r);
-        const up = isSolid(grid, c, r - 1);
-        const down = isSolid(grid, c, r + 1);
+    hallwayPinned(scene, grid, c, r) {
+        const left = isSolid(scene, grid, c - 1, r);
+        const right = isSolid(scene, grid, c + 1, r);
+        const up = isSolid(scene, grid, c, r - 1);
+        const down = isSolid(scene, grid, c, r + 1);
         return (left && right) || (up && down);
     },
-    isBoxStartDeadlocked(grid, targetKeys, c, r) {
+    isBoxStartDeadlocked(scene, grid, targetKeys, c, r) {
         // If the target is exactly here, allow corner/hallway (it may be intended as final)
         const onTarget = isTarget(targetKeys, c, r);
 
         // Corner against two perpendicular solids and not already on target
-        if (!onTarget && isCorner(grid, c, r)) return true;
+        if (!onTarget && isCorner(scene, grid, c, r)) return true;
 
         // Pinned in a 1-wide hallway (no lateral freedom) and not on target
-        if (!onTarget && hallwayPinned(grid, c, r)) return true;
+        if (!onTarget && hallwayPinned(scene, grid, c, r)) return true;
 
         // 2x2 traps (approximation)
-        if (!onTarget && forms2x2Trap(grid, c, r)) return true;
+        if (!onTarget && forms2x2Trap(scene, grid, c, r)) return true;
 
         return false;
     },
-    createsBoxPairWallTrap(grid, c, r, boxId) {
+    createsBoxPairWallTrap(scene, grid, c, r, boxId) {
         const nbrs = [
             { dc: 1, dr: 0 },
             { dc: -1, dr: 0 },
@@ -593,10 +588,14 @@ const Payloads = {
 
             // same-side walls for BOTH boxes?
             const sameSide =
-                (isSolid(grid, c - 1, r) && isSolid(grid, nc - 1, nr)) || // both have wall on left
-                (isSolid(grid, c + 1, r) && isSolid(grid, nc + 1, nr)) || // both right
-                (isSolid(grid, c, r - 1) && isSolid(grid, nc, nr - 1)) || // both up
-                (isSolid(grid, c, r + 1) && isSolid(grid, nc, nr + 1)); // both down
+                (isSolid(scene, grid, c - 1, r) &&
+                    isSolid(scene, grid, nc - 1, nr)) || // both have wall on left
+                (isSolid(scene, grid, c + 1, r) &&
+                    isSolid(scene, grid, nc + 1, nr)) || // both right
+                (isSolid(scene, grid, c, r - 1) &&
+                    isSolid(scene, grid, nc, nr - 1)) || // both up
+                (isSolid(scene, grid, c, r + 1) &&
+                    isSolid(scene, grid, nc, nr + 1)); // both down
 
             if (sameSide) return true;
         }
@@ -625,7 +624,7 @@ const Payloads = {
                 isBox(grid, c - 1, r - 1, boxId))
         );
     },
-    touchesExistingWall(grid, cells) {
+    touchesExistingWall(scene, grid, cells) {
         const mask = new Set(cells.map((p) => key(p.c, p.r)));
         const dirs = [
             [1, 0],
@@ -641,32 +640,13 @@ const Payloads = {
                 if (!inB(grid, nc, nr)) continue;
 
                 // touching a wall that is NOT part of this bar?
-                if (grid[nr][nc] === WALL && !mask.has(key(nc, nr))) {
+                if (scene.isWallVal(grid[r][c]) && !mask.has(key(nc, nr))) {
                     return true;
                 }
             }
         }
 
         return false;
-    },
-    measureRunLen(grid, c, r, dx, dy) {
-        // count contiguous WALLs including (c,r) and both directions
-        let len = 0,
-            x = c,
-            y = r;
-        // go backward
-        while (inB(grid, x - dx, y - dy) && grid[y - dy][x - dx] === WALL) {
-            x -= dx;
-            y -= dy;
-        }
-        // now walk forward
-        while (inB(grid, x, y) && grid[y][x] === WALL) {
-            len++;
-            x += dx;
-            y += dy;
-        }
-
-        return len;
     },
 };
 

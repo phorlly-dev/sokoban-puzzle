@@ -1,5 +1,5 @@
 import { emitEvent } from "../../hooks/EventBus";
-import { FLOOR, PLAYER, WALL } from "../consts";
+import { FLOOR, PLAYER } from "../consts";
 import {
     addWallsWithPlayability,
     buildLevel,
@@ -7,7 +7,6 @@ import {
     createsBoxPairWallTrap,
     isAnyDirectionActive,
     isBoxStartDeadlocked,
-    measureRunLen,
     playLevelCompleteFX,
 } from "./payload";
 import {
@@ -15,6 +14,7 @@ import {
     isBlocked,
     key,
     markForbiddenCells,
+    playIfNotPlaying,
     pushHistory,
     safeDestroy,
     shuffleInPlace,
@@ -109,7 +109,10 @@ const Controllers = {
             duration: STEP_MS,
             ease: "Linear",
             onStart: () => {
-                if (animKey) scene.player.anims.play(animKey, true);
+                if (animKey) {
+                    scene.player.anims.play(animKey, true);
+                    playIfNotPlaying(scene.walk);
+                }
             },
             onComplete: finish,
         });
@@ -201,7 +204,7 @@ const Controllers = {
         }
 
         // --- walls (connectivity-safe) ---
-        addWallsWithPlayability(grid, playerPos, level, {
+        addWallsWithPlayability(scene, grid, playerPos, level, {
             startLevel: 3,
             minDistFromPlayer: 1,
             protectTargets: true,
@@ -210,6 +213,7 @@ const Controllers = {
 
         // --- boxes avoiding deadlocks (after walls are final) ---
         let placed = placeBoxesAvoidingDeadlocks(
+            scene,
             grid,
             boxCount,
             pair,
@@ -220,6 +224,7 @@ const Controllers = {
         // optional retry if you want to guarantee count
         if (placed < boxCount) {
             placed += placeBoxesAvoidingDeadlocks(
+                scene,
                 grid,
                 boxCount - placed,
                 pair,
@@ -264,6 +269,7 @@ const Controllers = {
         return g;
     },
     placeBoxesAvoidingDeadlocks(
+        scene,
         grid,
         boxCount,
         pair,
@@ -284,9 +290,11 @@ const Controllers = {
                 if (!inInterior(c, r)) continue; // keep off borders
                 if (grid[r][c] !== FLOOR) continue; // free only
                 if (targetKeys.has(`${c},${r}`)) continue; // don’t start on targets
-                if (isBoxStartDeadlocked(grid, targetKeys, c, r)) continue; // your existing filter
+                if (isBoxStartDeadlocked(scene, grid, targetKeys, c, r))
+                    continue; // your existing filter
                 // NEW: reject if it would create a pair-against-wall with an existing box
-                if (createsBoxPairWallTrap(grid, c, r, pair.BOX)) continue;
+                if (createsBoxPairWallTrap(scene, grid, c, r, pair.BOX))
+                    continue;
                 // NEW: reject if it would form a 2×2 block of boxes
                 if (creates2x2BoxBlock(grid, c, r, pair.BOX)) continue;
 
@@ -299,8 +307,8 @@ const Controllers = {
         let placed = 0;
         for (const { c, r } of candidates) {
             // final safety before committing (grid mutates after this)
-            if (createsBoxPairWallTrap(grid, c, r, pair.BOX)) continue;
-            if (creates2x2BoxBlock(grid, c, r, pair.BOX)) continue;
+            if (createsBoxPairWallTrap(scene, grid, c, r, pair.BOX)) continue;
+            if (creates2x2BoxBlock(scene, grid, c, r, pair.BOX)) continue;
 
             grid[r][c] = pair.BOX;
             placed++;
@@ -308,23 +316,6 @@ const Controllers = {
         }
 
         return placed;
-    },
-    exceedsMaxRunAfterStamp(grid, cells, horiz, maxRun) {
-        // temp stamp
-        for (const { c, r } of cells) grid[r][c] = WALL;
-        const [dx, dy] = horiz ? [1, 0] : [0, 1];
-        let bad = false;
-        for (const { c, r } of cells) {
-            if (measureRunLen(grid, c, r, dx, dy) > maxRun) {
-                bad = true;
-                break;
-            }
-        }
-
-        // rollback
-        for (const { c, r } of cells) grid[r][c] = FLOOR;
-
-        return bad;
     },
 };
 
@@ -335,5 +326,4 @@ export const {
     generateRandomLevel,
     drawDashedGrid,
     placeBoxesAvoidingDeadlocks,
-    exceedsMaxRunAfterStamp,
 } = Controllers;
