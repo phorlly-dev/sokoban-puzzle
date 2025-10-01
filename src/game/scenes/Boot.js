@@ -1,5 +1,3 @@
-import { emitEvent } from "../../hooks/EventBus";
-
 class GameBoot extends Phaser.Scene {
     constructor() {
         super("game-boot");
@@ -20,7 +18,6 @@ class GameBoot extends Phaser.Scene {
     }
 
     create() {
-        emitEvent("current-scene-ready", this);
         this.scene.start("game-engine");
     }
 }

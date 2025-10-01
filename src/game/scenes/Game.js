@@ -1,12 +1,10 @@
 import { emitEvent, emitEvents, onEvent } from "../../hooks/EventBus";
 import { COLORS, WALL } from "../consts";
-import { tryMove } from "../utils/controller";
-import {
-    buildLevel,
-    createAnimations,
-    isAnyDirectionActive,
-} from "../utils/payload";
-import { clearButtons, key, toIdle, undoLastMove } from "../utils/state";
+import { tryMove, undoLastMove } from "../utils/controller";
+import { isAnyDirectionActive, key } from "../utils/helper";
+import { createAnimations } from "../utils/object";
+import { buildLevel } from "../utils/payload";
+import { clearButtons, toIdle } from "../utils/state";
 
 // ----------------------------------------------------------------------------
 class GameEngine extends Phaser.Scene {

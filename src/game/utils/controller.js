@@ -1,25 +1,21 @@
 import { emitEvent } from "../../hooks/EventBus";
-import { FLOOR, PLAYER } from "../consts";
+import { FLOOR } from "../consts";
 import {
-    addWallsWithPlayability,
-    buildLevel,
-    creates2x2BoxBlock,
-    createsBoxPairWallTrap,
+    gridToWorld,
     isAnyDirectionActive,
+    isBlocked,
+    key,
+    playIfNotPlaying,
+    safeDestroy,
+} from "./helper";
+import { creates2x2BoxBlock, createsBoxPairWallTrap } from "./object";
+import {
+    applySnapshotAnimated,
+    buildLevel,
     isBoxStartDeadlocked,
     playLevelCompleteFX,
 } from "./payload";
-import {
-    gridToWorld,
-    isBlocked,
-    key,
-    markForbiddenCells,
-    playIfNotPlaying,
-    pushHistory,
-    safeDestroy,
-    shuffleInPlace,
-    toIdle,
-} from "./state";
+import { pushHistory, shuffleInPlace, toIdle } from "./state";
 
 const Controllers = {
     destroyLevelGraphics(scene) {
@@ -142,17 +138,20 @@ const Controllers = {
             .text(width / 2, height / 2, `Level ${scene.level} Complete!`, {
                 fontSize: "32px",
                 fontStyle: "bold",
-                color: "#00ff00",
+                color: "#0fce0fff",
                 stroke: "#003300",
                 strokeThickness: 4,
             })
             .setOrigin(0.5)
             .setDepth(10);
 
-        // play effects 🎉
-        playLevelCompleteFX(scene, winText);
+        scene.sound.play("win");
+        const points = scene.boxLength * 100;
 
-        scene.score += scene.boxLength * 100;
+        // play effects 🎉
+        playLevelCompleteFX(scene, winText, points);
+
+        scene.score += points;
         emitEvent("score", scene.score);
 
         // Example: progress and rebuild the next level after a short pause
@@ -168,105 +167,6 @@ const Controllers = {
             });
             buildLevel(scene);
         });
-    },
-    generateRandomLevel(
-        scene,
-        { rows, cols, boxCount = 1, pair = scene.currentPair, level = 1 }
-    ) {
-        markForbiddenCells(scene, rows, cols);
-
-        // base grid
-        const grid = Array.from({ length: rows }, () =>
-            Array(cols).fill(FLOOR)
-        );
-
-        // usable cells (skip forbidden)
-        const cells = [];
-        for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-                if (!scene.forbiddenCells.has(key(c, r))) cells.push({ r, c });
-            }
-        }
-        shuffleInPlace(cells);
-
-        // --- player ---
-        const p = cells.pop();
-        grid[p.r][p.c] = PLAYER;
-        const playerPos = { col: p.c, row: p.r };
-
-        // --- targets first (so walls respect them and box filter can see them) ---
-        const targetKeys = new Set();
-        for (let i = 0; i < boxCount; i++) {
-            const t = cells.pop();
-            if (!t) break;
-            grid[t.r][t.c] = pair.TARGET;
-            targetKeys.add(key(t.c, t.r));
-        }
-
-        // --- walls (connectivity-safe) ---
-        addWallsWithPlayability(scene, grid, playerPos, level, {
-            startLevel: 3,
-            minDistFromPlayer: 1,
-            protectTargets: true,
-            targetKeys, // Set of "c,r" strings for your targets
-        });
-
-        // --- boxes avoiding deadlocks (after walls are final) ---
-        let placed = placeBoxesAvoidingDeadlocks(
-            scene,
-            grid,
-            boxCount,
-            pair,
-            targetKeys,
-            { avoidBorder: 1 } // 1-cell margin; use 2 for a thicker safety ring
-        );
-
-        // optional retry if you want to guarantee count
-        if (placed < boxCount) {
-            placed += placeBoxesAvoidingDeadlocks(
-                scene,
-                grid,
-                boxCount - placed,
-                pair,
-                targetKeys,
-                { avoidBorder: 2 }
-            );
-        }
-
-        return grid;
-    },
-    drawDashedGrid(
-        scene,
-        { rows, cols, tileSize, offsetX = 0, offsetY = 0, dash = 6, gap = 4 }
-    ) {
-        if (scene.gridGraphics) scene.gridGraphics.destroy();
-        const g = (scene.gridGraphics = scene.add.graphics());
-        g.lineStyle(1, 0xff0000, 0.35);
-
-        const width = cols * tileSize;
-        const height = rows * tileSize;
-
-        for (let c = 0; c <= cols; c++) {
-            const x = offsetX + c * tileSize;
-            for (let y = 0; y < height; y += dash + gap) {
-                g.beginPath();
-                g.moveTo(x, offsetY + y);
-                g.lineTo(x, offsetY + Math.min(y + dash, height));
-                g.strokePath();
-            }
-        }
-        for (let r = 0; r <= rows; r++) {
-            const y = offsetY + r * tileSize;
-            for (let x = 0; x < width; x += dash + gap) {
-                g.beginPath();
-                g.moveTo(offsetX + x, y);
-                g.lineTo(offsetX + Math.min(x + dash, width), y);
-                g.strokePath();
-            }
-        }
-        g.setDepth(5);
-
-        return g;
     },
     placeBoxesAvoidingDeadlocks(
         scene,
@@ -317,13 +217,18 @@ const Controllers = {
 
         return placed;
     },
+    undoLastMove(scene) {
+        if (scene.isMoving) return;
+        const snap = scene.history.pop();
+        if (!snap) return; // nothing to undo
+        applySnapshotAnimated(scene, snap, 140); // match your STEP_MS feel
+    },
 };
 
 export const {
     destroyLevelGraphics,
     tryMove,
     checkWin,
-    generateRandomLevel,
-    drawDashedGrid,
     placeBoxesAvoidingDeadlocks,
+    undoLastMove,
 } = Controllers;

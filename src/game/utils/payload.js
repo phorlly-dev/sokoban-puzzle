@@ -1,23 +1,15 @@
 import { COLORS, FLOOR, PLAYER } from "../consts";
+import { destroyLevelGraphics } from "./controller";
 import {
-    destroyLevelGraphics,
-    drawDashedGrid,
     generateRandomLevel,
-} from "./controller";
-import {
+    getRandom,
     gridToWorld,
     inB,
-    isBox,
-    isCorner,
-    isCursorHeld,
-    isSolid,
-    isTarget,
     key,
-    makeAnims,
-    randomWall,
     snapToGrid,
-    toIdle,
-} from "./state";
+} from "./helper";
+import { drawDashedGrid } from "./object";
+import { isCorner, isSolid, isTarget, randomWall, toIdle } from "./state";
 
 const Payloads = {
     buildLevel(scene) {
@@ -27,9 +19,9 @@ const Payloads = {
         destroyLevelGraphics(scene);
 
         // choose one color pair for scene level
-        scene.currentPair = Phaser.Utils.Array.GetRandom(Object.values(COLORS));
+        scene.currentPair = getRandom(Object.values(COLORS));
 
-        scene.boxLength = Phaser.Utils.Array.GetRandom([1, 2, 3, 4, 5]);
+        scene.boxLength = getRandom([1, 2, 3, 4, 5]);
 
         // generate grid data (make sure your generator can place WALLs)
         scene.data = generateRandomLevel(scene, {
@@ -215,20 +207,7 @@ const Payloads = {
             });
         }
     },
-    isAnyDirectionActive(scene) {
-        const c = scene.cursors || {};
-        return (
-            scene.isLeft ||
-            scene.isRight ||
-            scene.isUp ||
-            scene.isDown ||
-            isCursorHeld(c.left) ||
-            isCursorHeld(c.right) ||
-            isCursorHeld(c.up) ||
-            isCursorHeld(c.down)
-        );
-    },
-    playLevelCompleteFX(scene, winText) {
+    playLevelCompleteFX(scene, winText, scoreText) {
         const cam = scene.cameras.main;
 
         // 1) Screen flash + tiny shake
@@ -285,12 +264,11 @@ const Payloads = {
 
         // 4) Quick score pop feedback (if you update score here)
         const scoreBump = scene.add
-            .text(
-                winText ? winText.x : scene.scale.width / 2,
-                (winText ? winText.y : scene.scale.height / 2) + 40,
-                `+${scene.score}`,
-                { fontSize: "24px", fontStyle: "bold", color: "#7ea07eff" }
-            )
+            .text(winText.x, winText.y - 40, `+${scoreText}`, {
+                fontSize: "24px",
+                fontStyle: "bold",
+                color: "#1ff11fff",
+            })
             .setOrigin(0.5)
             .setDepth(11)
             .setAlpha(0);
@@ -299,7 +277,7 @@ const Payloads = {
             targets: scoreBump,
             alpha: 1,
             y: scoreBump.y - 22,
-            duration: 240,
+            duration: 240 * 2,
             ease: "Quad.Out",
             yoyo: true,
             hold: 120,
@@ -308,14 +286,6 @@ const Payloads = {
 
         // Optional: play a win sound if you have one
         if (scene.sound && scene.sound.get("win")) scene.sound.play("win");
-    },
-    createAnimations(scene) {
-        makeAnims(scene, "tiles", [
-            { key: "left", start: 81, end: 83 },
-            { key: "right", start: 78, end: 80 },
-            { key: "up", start: 55, end: 57 },
-            { key: "down", start: 52, end: 54 },
-        ]);
     },
     addWallsWithPlayability(
         scene,
@@ -576,56 +546,6 @@ const Payloads = {
 
         return false;
     },
-    createsBoxPairWallTrap(scene, grid, c, r, boxId) {
-        const nbrs = [
-            { dc: 1, dr: 0 },
-            { dc: -1, dr: 0 },
-            { dc: 0, dr: 1 },
-            { dc: 0, dr: -1 },
-        ];
-        for (const { dc, dr } of nbrs) {
-            const nc = c + dc,
-                nr = r + dr;
-            if (!isBox(grid, nc, nr, boxId)) continue;
-
-            // same-side walls for BOTH boxes?
-            const sameSide =
-                (isSolid(scene, grid, c - 1, r) &&
-                    isSolid(scene, grid, nc - 1, nr)) || // both have wall on left
-                (isSolid(scene, grid, c + 1, r) &&
-                    isSolid(scene, grid, nc + 1, nr)) || // both right
-                (isSolid(scene, grid, c, r - 1) &&
-                    isSolid(scene, grid, nc, nr - 1)) || // both up
-                (isSolid(scene, grid, c, r + 1) &&
-                    isSolid(scene, grid, nc, nr + 1)); // both down
-
-            if (sameSide) return true;
-        }
-
-        return false;
-    },
-    creates2x2BoxBlock(grid, c, r, boxId) {
-        const B = (x, y) => isBox(grid, x, y, boxId) || (x === c && y === r); // include candidate
-        // check four orientations around (c,r)
-        return (
-            (B(c, r) &&
-                isBox(grid, c + 1, r, boxId) &&
-                isBox(grid, c, r + 1, boxId) &&
-                isBox(grid, c + 1, r + 1, boxId)) ||
-            (B(c, r) &&
-                isBox(grid, c - 1, r, boxId) &&
-                isBox(grid, c, r + 1, boxId) &&
-                isBox(grid, c - 1, r + 1, boxId)) ||
-            (B(c, r) &&
-                isBox(grid, c + 1, r, boxId) &&
-                isBox(grid, c, r - 1, boxId) &&
-                isBox(grid, c + 1, r - 1, boxId)) ||
-            (B(c, r) &&
-                isBox(grid, c - 1, r, boxId) &&
-                isBox(grid, c, r - 1, boxId) &&
-                isBox(grid, c - 1, r - 1, boxId))
-        );
-    },
     touchesExistingWall(scene, grid, cells) {
         const mask = new Set(cells.map((p) => key(p.c, p.r)));
         const dirs = [
@@ -655,16 +575,11 @@ const Payloads = {
 export const {
     buildLevel,
     applySnapshotAnimated,
-    isAnyDirectionActive,
     playLevelCompleteFX,
-    createAnimations,
     addWallsWithPlayability,
     centerBoardOffset,
     forms2x2Trap,
     hallwayPinned,
     isBoxStartDeadlocked,
-    createsBoxPairWallTrap,
-    creates2x2BoxBlock,
     touchesExistingWall,
-    measureRunLen,
 } = Payloads;
