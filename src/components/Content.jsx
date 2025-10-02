@@ -9,17 +9,6 @@ const Footer = React.lazy(() => import("./Footer"));
 const Content = ({ player, onLogout }) => {
     const phaserRef = React.useRef();
 
-    React.useEffect(() => {
-        const events = ["header", "footer"];
-        const callbacks = [
-            (data = false) => setIsFooter(data),
-            (data = false) => setIsHeader(data),
-        ];
-
-        onEvents({ events, callbacks });
-        return () => offEvents({ events, callbacks });
-    }, []);
-
     return (
         <div className="game-container bg-secondary bg-opacity-75">
             <div className="card m-0">
