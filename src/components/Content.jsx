@@ -8,8 +8,6 @@ const Footer = React.lazy(() => import("./Footer"));
 
 const Content = ({ player, onLogout }) => {
     const phaserRef = React.useRef();
-    const [isFooter, setIsFooter] = React.useState(true);
-    const [isHeader, setIsHeader] = React.useState(false);
 
     React.useEffect(() => {
         const events = ["header", "footer"];
@@ -20,7 +18,7 @@ const Content = ({ player, onLogout }) => {
 
         onEvents({ events, callbacks });
         return () => offEvents({ events, callbacks });
-    }, [isHeader]);
+    }, []);
 
     return (
         <div className="game-container bg-secondary bg-opacity-75">
@@ -38,7 +36,7 @@ const Content = ({ player, onLogout }) => {
                 </main>
 
                 {/* FOOTER */}
-                <Footer isFooter={isFooter} />
+                <Footer />
             </div>
         </div>
     );
